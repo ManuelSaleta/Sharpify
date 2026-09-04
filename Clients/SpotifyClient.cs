@@ -6,6 +6,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Scrapefy.Responses;
 
 public sealed class SpotifyClient
 {
@@ -13,8 +14,6 @@ public sealed class SpotifyClient
     private readonly Uri _BaseAddress = new("https://api.spotify.com/v1");
     private readonly string clientId = "";
     private readonly string clientSecret = "";
-    public sealed record AccessTokenResponse(string AccessToken, string TokenType, int ExpiresIn);
-    public sealed record PlayListResponse(string Name, string Description, string Href, string Id, string Uri);
     private AccessTokenResponse? _accessTokenResponse;
     private bool _expired = true;
     private DateTime _tokenExpirationTime;
@@ -42,10 +41,17 @@ public sealed class SpotifyClient
             new AuthenticationHeaderValue("Bearer", _accessTokenResponse!.AccessToken);
     }
 
-    public async Task<PlayListResponse> GetPlaylistAsync(string? id = "someId", string? endpoint = "playlists", CancellationToken ct = default)
+
+    public async Task<PaginatedResponse<SpotifyTrack>> GetPlaylistItemsAsync(string id, Dictionary<string, string>? q = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+
+        return await Request<PaginatedResponse<SpotifyTrack>>($"playlists/{id}/items", HttpMethod.Get, ct);
+    }
+    public async Task<PlayListResponse> GetPlaylistAsync(string id, CancellationToken ct = default)
     {
         // no query params for now.
-        return await Request<PlayListResponse>($"{endpoint}/{id}", HttpMethod.Get, ct);
+        return await Request<PlayListResponse>($"playlists/{id}", HttpMethod.Get, ct);
     }
 
     private async Task<T> Request<T>(string endpoint, HttpMethod verb, CancellationToken ct = default)
@@ -56,8 +62,9 @@ public sealed class SpotifyClient
         // TODO: Add support for multiple HTTP verbs and query parameters if needed in the future.
         // For now, we only support GET requests without query parameters.
         // The method's name implies that it can handle different HTTP verbs, but currently, it only supports GET requests.
-        var response = await _httpClient.GetStringAsync($"{_BaseAddress}/{endpoint}", ct);
-        var result = JsonSerializer.Deserialize<T>(response, DefaultJsonOptions);
+        var response = await _httpClient.GetAsync($"{_BaseAddress}/{endpoint}", ct);
+        var data = await response.Content.ReadAsStringAsync(ct);
+        var result = JsonSerializer.Deserialize<T>(data, DefaultJsonOptions);
 
         return result ?? throw new InvalidOperationException("Failed to deserialize response.");
     }
