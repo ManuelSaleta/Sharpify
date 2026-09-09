@@ -1,4 +1,4 @@
-namespace Scrapefy.Clients;
+namespace Sharpify.Clients;
 
 using System;
 using System.Net.Http;
@@ -6,18 +6,18 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Scrapefy.Responses;
+using Microsoft.Extensions.Options;
+using Sharpify.Lib;
+using Sharpify.Lib.Responses;
 
 public sealed class SpotifyClient
 {
     private readonly HttpClient _httpClient;
-    private readonly Uri _BaseAddress = new("https://api.spotify.com/v1");
-    private readonly string clientId = "";
-    private readonly string clientSecret = "";
+    private readonly SpotifyClientOptions _options;
+    public sealed record AccessTokenResponse(string AccessToken, string TokenType, int ExpiresIn);
+    public sealed record PlayListResponse(string Name, string Description, string Href, string Id, string Uri);
     private AccessTokenResponse? _accessTokenResponse;
-    private bool _expired = true;
     private DateTime _tokenExpirationTime;
-
 
     private static readonly JsonSerializerOptions DefaultJsonOptions = new()
     {
@@ -25,20 +25,15 @@ public sealed class SpotifyClient
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
     };
 
-    public SpotifyClient()
+    public SpotifyClient(HttpClient httpClient, IOptions<SpotifyClientOptions> options)
     {
+        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
 
-        _httpClient = new HttpClient
+        if (_httpClient.BaseAddress is null && !string.IsNullOrWhiteSpace(_options.ClientBaseUrl))
         {
-            // Configure default headers for Spotify API calls
-            BaseAddress = _BaseAddress
-        };
-
-
-        RenewAccessToken();
-
-        _httpClient.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", _accessTokenResponse!.AccessToken);
+            _httpClient.BaseAddress = new Uri(_options.ClientBaseUrl.TrimEnd('/') + "/");
+        }
     }
 
 
@@ -58,21 +53,29 @@ public sealed class SpotifyClient
     {
         ArgumentNullException.ThrowIfNull(endpoint);
         ArgumentNullException.ThrowIfNull(verb);
-        RenewAccessToken();
+        await EnsureAccessTokenAsync(ct);
+
         // TODO: Add support for multiple HTTP verbs and query parameters if needed in the future.
         // For now, we only support GET requests without query parameters.
         // The method's name implies that it can handle different HTTP verbs, but currently, it only supports GET requests.
         var response = await _httpClient.GetAsync($"{_BaseAddress}/{endpoint}", ct);
         var data = await response.Content.ReadAsStringAsync(ct);
         var result = JsonSerializer.Deserialize<T>(data, DefaultJsonOptions);
+        var url = _httpClient.BaseAddress is null
+            ? $"{_options.ClientBaseUrl.TrimEnd('/')}/{endpoint.TrimStart('/')}"
+            : endpoint.TrimStart('/');
+
+        var response = await _httpClient.GetStringAsync(url, ct);
+        var result = JsonSerializer.Deserialize<T>(response, DefaultJsonOptions);
 
         return result ?? throw new InvalidOperationException("Failed to deserialize response.");
     }
 
     private async Task<AccessTokenResponse> GetAccessTokenAsync(CancellationToken ct = default)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, "https://accounts.spotify.com/api/token");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{clientId}:{clientSecret}")));
+        var request = new HttpRequestMessage(HttpMethod.Post, _options.UserAccountUrl);
+        var credentials = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{_options.ClientId}:{_options.ClientSecret}"));
+        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
         request.Content = new FormUrlEncodedContent(
         [
             new KeyValuePair<string, string>("grant_type", "client_credentials")
@@ -85,19 +88,20 @@ public sealed class SpotifyClient
         return JsonSerializer.Deserialize<AccessTokenResponse>(content, DefaultJsonOptions) ?? throw new InvalidOperationException("Failed to deserialize access token response.");
     }
 
+    private async Task EnsureAccessTokenAsync(CancellationToken ct = default)
+    {
+        if (_accessTokenResponse is null || DateTime.UtcNow >= _tokenExpirationTime)
+        {
+            _accessTokenResponse = await GetAccessTokenAsync(ct);
+            _tokenExpirationTime = DateTime.UtcNow.AddSeconds(_accessTokenResponse.ExpiresIn);
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _accessTokenResponse.AccessToken);
+        }
+    }
+
     private void RenewAccessToken()
     {
-        if (DateTime.Now > _tokenExpirationTime)
-        {
-
-            _accessTokenResponse =
-            GetAccessTokenAsync()
-            .GetAwaiter()
-            .GetResult();
-
-            _tokenExpirationTime = DateTime.Now.AddSeconds(_accessTokenResponse.ExpiresIn);
-            _expired = false;
-        }
+        EnsureAccessTokenAsync().GetAwaiter().GetResult();
     }
 
 }

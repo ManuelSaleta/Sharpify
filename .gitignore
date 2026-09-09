@@ -1,2 +1,4 @@
-obj/*
-bin/*
+[Bb]in/
+[Oo]bj/
+.idea/
+.vs/

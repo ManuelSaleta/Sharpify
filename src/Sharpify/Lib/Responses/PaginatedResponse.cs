@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Scrapefy.Responses;
+namespace Sharpify.Lib.Responses;
 
 public sealed record PaginatedResponse<T>(
     string Href,
