@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Sharpify/Sharpify.csproj" />
+  <Project Path="Sharpify.Tests/Sharpify.Tests.csproj" />
+</Solution>
