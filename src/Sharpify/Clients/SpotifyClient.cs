@@ -1,6 +1,7 @@
 namespace Sharpify.Clients;
 
 using System;
+using System.IO.Pipelines;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -9,8 +10,20 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 using Sharpify.Lib;
 using Sharpify.Lib.Responses;
+using Sharpify.Requests;
 
-public sealed class SpotifyClient
+public interface ISpotifyClient
+{
+    /// <summary>
+    /// Builds generic SpotifyRequest, should work for any request type for spotify
+    /// </summary>
+    /// <typeparam name="T"> the typeof Response</typeparam>
+    /// <param name="request">typeof SpotifyRequest</param>
+    /// <param name="ct">Cancellation string</param>
+    /// <returns></returns>
+    public Task<T> Request<T>(SpotifyRequest request, CancellationToken ct = default);
+}
+public sealed class SpotifyClient : ISpotifyClient
 {
     private readonly HttpClient _httpClient;
     private readonly SpotifyClientOptions _options;
@@ -37,28 +50,34 @@ public sealed class SpotifyClient
     }
 
 
-    public async Task<PaginatedResponse<SpotifyTrack>> GetPlaylistItemsAsync(string id, Dictionary<string, string>? q = null, CancellationToken ct = default)
+    public async Task<PaginatedResponse<SpotifyTrack>> GetPlaylistItemsAsync(SpotifyRequest r, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(id);
+        ArgumentNullException.ThrowIfNull(r);
 
-        return await Request<PaginatedResponse<SpotifyTrack>>($"playlists/{id}/items", HttpMethod.Get, ct);
-    }
-    public async Task<PlayListResponse> GetPlaylistAsync(string id, CancellationToken ct = default)
-    {
-        // no query params for now.
-        return await Request<PlayListResponse>($"playlists/{id}", HttpMethod.Get, ct);
+        return await Request<PaginatedResponse<SpotifyTrack>>(r, ct);
     }
 
-    private async Task<T> Request<T>(string endpoint, HttpMethod verb, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(endpoint);
-        ArgumentNullException.ThrowIfNull(verb);
-        await EnsureAccessTokenAsync(ct);
+    // public async Task<PlayListResponse> GetPlaylistAsync(string id, CancellationToken ct = default)
+    // {
+    //     // no query params for now.
+    //     return await Request<PlayListResponse>($"playlists/{id}", HttpMethod.Get, ct);
+    // }
 
-        // TODO: Add support for multiple HTTP verbs and query parameters if needed in the future.
-        // For now, we only support GET requests without query parameters.
-        // The method's name implies that it can handle different HTTP verbs, but currently, it only supports GET requests.
-        var response = await _httpClient.GetAsync($"{_BaseAddress}/{endpoint}", ct);
+    public async Task<T> Request<T>(SpotifyRequest r, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(r.Uri);
+        // ArgumentNullException.ThrowIfNull(r.Method); uncomment when used
+        RenewAccessToken();
+        // if r has query params build url string w/ them  else simple url;
+        var url = r.QueryParameters?.Count > 0 ?
+                $"{_BaseAddress}/{r.Uri}?{r.QueryParameters.Values}" : $"{_BaseAddress}/{r.Uri}";
+
+        var response = await _httpClient.GetAsync(url, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException($"Headers: {_httpClient.DefaultRequestHeaders} Request: {url}, Response: {response.ReasonPhrase}");
+        }
         var data = await response.Content.ReadAsStringAsync(ct);
         var result = JsonSerializer.Deserialize<T>(data, DefaultJsonOptions);
         var url = _httpClient.BaseAddress is null
@@ -68,6 +87,9 @@ public sealed class SpotifyClient
         var response = await _httpClient.GetStringAsync(url, ct);
         var result = JsonSerializer.Deserialize<T>(response, DefaultJsonOptions);
 
+
+
+        //TODO: Use Result<T>
         return result ?? throw new InvalidOperationException("Failed to deserialize response.");
     }
 
