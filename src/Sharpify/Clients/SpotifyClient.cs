@@ -66,11 +66,12 @@ public sealed class SpotifyClient : ISpotifyClient
     public async Task<T> Request<T>(SpotifyRequest r, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(r.Uri);
-        // ArgumentNullException.ThrowIfNull(r.Method); uncomment when used
+        ArgumentNullException.ThrowIfNull(r.Method);
         RenewAccessToken();
+
         // if r has query params build url string w/ them  else simple url;
         var url = r.QueryParameters?.Count > 0 ?
-                $"{_BaseAddress}/{r.Uri}?{r.QueryParameters.Values}" : $"{_BaseAddress}/{r.Uri}";
+                $"{r.Uri}?{r.QueryParameters.Values}" : $"{r.Uri}";
 
         var response = await _httpClient.GetAsync(url, ct);
 
@@ -80,13 +81,6 @@ public sealed class SpotifyClient : ISpotifyClient
         }
         var data = await response.Content.ReadAsStringAsync(ct);
         var result = JsonSerializer.Deserialize<T>(data, DefaultJsonOptions);
-        var url = _httpClient.BaseAddress is null
-            ? $"{_options.ClientBaseUrl.TrimEnd('/')}/{endpoint.TrimStart('/')}"
-            : endpoint.TrimStart('/');
-
-        var response = await _httpClient.GetStringAsync(url, ct);
-        var result = JsonSerializer.Deserialize<T>(response, DefaultJsonOptions);
-
 
 
         //TODO: Use Result<T>

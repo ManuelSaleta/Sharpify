@@ -1,4 +1,23 @@
+# Build and output results
 [Bb]in/
 [Oo]bj/
-.idea/
+[Aa]rtifacts/
+[Pp]ackages/
+TestResults/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# IDEs and Editors
 .vs/
+.idea/
+*.swp
+*.*~
+
+# macOS
+.DS_Store
+
+# User-specific / Local secrets override
+appsettings*.local.json
+secrets.json
