@@ -1,16 +1,10 @@
-namespace Sharpify.Clients;
+namespace Sharpify.Core.Clients;
 
-using System;
-using System.IO.Pipelines;
-using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
-using Sharpify.Lib;
-using Sharpify.Lib.Responses;
-using Sharpify.Requests;
+using Sharpify.Core.Requests;
+using Sharpify.Core.Responses;
 
 public interface ISpotifyClient
 {

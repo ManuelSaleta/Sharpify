@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Sharpify.Lib;
+namespace Sharpify.Core.Clients;
 
 public sealed class SpotifyClientOptions
 {

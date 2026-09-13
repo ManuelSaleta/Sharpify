@@ -21,4 +21,8 @@
     <PackageReference Include="Microsoft.Extensions.Options.DataAnnotations" Version="10.0.12" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\Sharpify.Core\Sharpify.Core.csproj" />
+  </ItemGroup>
+
 </Project>

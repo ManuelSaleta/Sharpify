@@ -1,4 +1,4 @@
-namespace Sharpify.Requests;
+namespace Sharpify.Core.Requests;
 
 /// <summary>
 /// Build any valid spotify request
