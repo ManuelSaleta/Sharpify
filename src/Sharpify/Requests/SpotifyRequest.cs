@@ -5,9 +5,16 @@ namespace Sharpify.Requests;
 /// </summary>
 /// <param name="uri"></param>
 /// <param name="q"></param>
-public sealed class SpotifyRequest(string uri, HttpVerbPOST, IReadOnlyDictionary<string, string>? q = null)
+public sealed class SpotifyRequest(string uri, HttpMethod? method = null, object? req = null, IReadOnlyDictionary<string, string>? q = null)
 {
+    //TODO: Implement req;
+    public SpotifyRequest(string uri, IReadOnlyDictionary<string, string>? q)
+        : this(uri, HttpMethod.Get, q)
+    {
+    }
+
     public string Uri { get; set; } = uri;
+    public HttpMethod Method { get; set; } = method ?? HttpMethod.Get;
     public IReadOnlyDictionary<string, string>? QueryParameters { get; } = q;
 
     /// <summary>
