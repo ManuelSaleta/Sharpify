@@ -1,9 +1,8 @@
-using Sharpify.Clients;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using Sharpify.Lib;
+using Sharpify.Core.Clients;
 
 internal class Program
 {

@@ -1,7 +1,4 @@
-using System;
-using System.Collections.Generic;
-
-namespace Sharpify.Lib.Responses;
+namespace Sharpify.Core.Responses;
 
 public sealed record PaginatedResponse<T>(
     string Href,

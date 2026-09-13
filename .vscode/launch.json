@@ -5,10 +5,19 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": ".NET Core Launch (console)",
+            "type": "node",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/src/Sharpify.App/bin/Debug/net10.0/Sharpify.App.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/src/Sharpify.App",
+            "console": "internalConsole"
+        },
+        {
             "name": ".NET Core Attach",
-            "type": "coreclr",
+            "type": "node",
             "request": "attach"
         }
-
     ]
 }
