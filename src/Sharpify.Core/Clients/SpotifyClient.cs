@@ -1,8 +1,10 @@
 namespace Sharpify.Core.Clients;
 
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Sharpify.Core.Authentication;
 using Sharpify.Core.Requests;
 using Sharpify.Core.Responses;
 
@@ -13,18 +15,37 @@ public interface ISpotifyClient
     /// </summary>
     /// <typeparam name="T"> the typeof Response</typeparam>
     /// <param name="request">typeof SpotifyRequest</param>
-    /// <param name="ct">Cancellation string</param>
+    /// <param name="ct">Cancellation token</param>
     /// <returns></returns>
-    public Task<T> Request<T>(SpotifyRequest request, CancellationToken ct = default);
+    Task<T> Request<T>(SpotifyRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves items (tracks/episodes) from a playlist by playlist ID.
+    /// </summary>
+    Task<PaginatedResponse<SavedItem>> GetPlaylistItemsAsync(string playlistId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves items from a playlist using a SpotifyRequest.
+    /// </summary>
+    Task<PaginatedResponse<SavedItem>> GetPlaylistItemsAsync(SpotifyRequest r, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves playlist details by playlist ID.
+    /// </summary>
+    Task<PlayListResponse> GetPlaylistAsync(string playlistId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Retrieves the current user's playlists.
+    /// </summary>
+    Task<PaginatedResponse<PlayListResponse>> GetUserPlaylistsAsync(CancellationToken ct = default);
 }
+
 public sealed class SpotifyClient : ISpotifyClient
 {
     private readonly HttpClient _httpClient;
     private readonly SpotifyClientOptions _options;
-    public sealed record AccessTokenResponse(string AccessToken, string TokenType, int ExpiresIn);
-    public sealed record PlayListResponse(string Name, string Description, string Href, string Id, string Uri);
-    private AccessTokenResponse? _accessTokenResponse;
-    private DateTime _tokenExpirationTime;
+    private readonly ISpotifyAuthService _authService;
+    private readonly ISpotifyTokenStore _tokenStore;
 
     private static readonly JsonSerializerOptions DefaultJsonOptions = new()
     {
@@ -32,10 +53,16 @@ public sealed class SpotifyClient : ISpotifyClient
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
     };
 
-    public SpotifyClient(HttpClient httpClient, IOptions<SpotifyClientOptions> options)
+    public SpotifyClient(
+        HttpClient httpClient,
+        IOptions<SpotifyClientOptions> options,
+        ISpotifyAuthService? authService = null,
+        ISpotifyTokenStore? tokenStore = null)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _authService = authService ?? new SpotifyAuthService(httpClient, options);
+        _tokenStore = tokenStore ?? new InMemorySpotifyTokenStore();
 
         if (_httpClient.BaseAddress is null && !string.IsNullOrWhiteSpace(_options.ClientBaseUrl))
         {
@@ -43,75 +70,85 @@ public sealed class SpotifyClient : ISpotifyClient
         }
     }
 
-
-    public async Task<PaginatedResponse<SpotifyTrack>> GetPlaylistItemsAsync(SpotifyRequest r, CancellationToken ct = default)
+    public async Task<PaginatedResponse<SavedItem>> GetPlaylistItemsAsync(string playlistId, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(r);
-
-        return await Request<PaginatedResponse<SpotifyTrack>>(r, ct);
+        ArgumentException.ThrowIfNullOrWhiteSpace(playlistId);
+        return await GetPlaylistItemsAsync(new SpotifyRequest($"playlists/{playlistId}/items"), ct);
     }
 
-    // public async Task<PlayListResponse> GetPlaylistAsync(string id, CancellationToken ct = default)
-    // {
-    //     // no query params for now.
-    //     return await Request<PlayListResponse>($"playlists/{id}", HttpMethod.Get, ct);
-    // }
+    public async Task<PaginatedResponse<SavedItem>> GetPlaylistItemsAsync(SpotifyRequest r, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(r);
+        return await Request<PaginatedResponse<SavedItem>>(r, ct);
+    }
+
+    public async Task<PlayListResponse> GetPlaylistAsync(string playlistId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(playlistId);
+        return await Request<PlayListResponse>(new SpotifyRequest($"playlists/{playlistId}"), ct);
+    }
+
+    public async Task<PaginatedResponse<PlayListResponse>> GetUserPlaylistsAsync(CancellationToken ct = default)
+    {
+        return await Request<PaginatedResponse<PlayListResponse>>(new SpotifyRequest("me/playlists"), ct);
+    }
+
 
     public async Task<T> Request<T>(SpotifyRequest r, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(r);
         ArgumentNullException.ThrowIfNull(r.Uri);
         ArgumentNullException.ThrowIfNull(r.Method);
-        RenewAccessToken();
 
-        // if r has query params build url string w/ them  else simple url;
-        var url = r.QueryParameters?.Count > 0 ?
-                $"{r.Uri}?{r.QueryParameters.Values}" : $"{r.Uri}";
+        var token = await EnsureAccessTokenAsync(ct);
 
-        var response = await _httpClient.GetAsync(url, ct);
+        var url = r.ToString().TrimStart('/');
+        using var httpRequest = new HttpRequestMessage(r.Method, url);
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.AccessToken);
+
+        if (r.Body is not null)
+        {
+            httpRequest.Content = JsonContent.Create(r.Body, options: DefaultJsonOptions);
+        }
+
+        var response = await _httpClient.SendAsync(httpRequest, ct);
 
         if (!response.IsSuccessStatusCode)
         {
-            throw new HttpRequestException($"Headers: {_httpClient.DefaultRequestHeaders} Request: {url}, Response: {response.ReasonPhrase}");
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException($"Spotify API request failed. Status: {response.StatusCode} ({response.ReasonPhrase}) Request: {url}, Error: {errorBody}");
         }
+
         var data = await response.Content.ReadAsStringAsync(ct);
         var result = JsonSerializer.Deserialize<T>(data, DefaultJsonOptions);
 
-
-        //TODO: Use Result<T>
         return result ?? throw new InvalidOperationException("Failed to deserialize response.");
     }
 
-    private async Task<AccessTokenResponse> GetAccessTokenAsync(CancellationToken ct = default)
+    private async Task<SpotifyToken> EnsureAccessTokenAsync(CancellationToken ct = default)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, _options.UserAccountUrl);
-        var credentials = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{_options.ClientId}:{_options.ClientSecret}"));
-        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", credentials);
-        request.Content = new FormUrlEncodedContent(
-        [
-            new KeyValuePair<string, string>("grant_type", "client_credentials")
-        ]);
-
-        var response = await _httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
-
-        var content = await response.Content.ReadAsStringAsync(ct);
-        return JsonSerializer.Deserialize<AccessTokenResponse>(content, DefaultJsonOptions) ?? throw new InvalidOperationException("Failed to deserialize access token response.");
-    }
-
-    private async Task EnsureAccessTokenAsync(CancellationToken ct = default)
-    {
-        if (_accessTokenResponse is null || DateTime.UtcNow >= _tokenExpirationTime)
+        var token = await _tokenStore.GetTokenAsync(ct);
+        if (token is not null && !token.IsExpired)
         {
-            _accessTokenResponse = await GetAccessTokenAsync(ct);
-            _tokenExpirationTime = DateTime.UtcNow.AddSeconds(_accessTokenResponse.ExpiresIn);
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", _accessTokenResponse.AccessToken);
+            return token;
         }
-    }
 
-    private void RenewAccessToken()
-    {
-        EnsureAccessTokenAsync().GetAwaiter().GetResult();
-    }
+        if (!string.IsNullOrWhiteSpace(token?.RefreshToken))
+        {
+            try
+            {
+                var refreshedToken = await _authService.RefreshTokenAsync(token.RefreshToken, ct);
+                await _tokenStore.SaveTokenAsync(refreshedToken, ct);
+                return refreshedToken;
+            }
+            catch
+            {
+                // If refresh fails, fall back to client credentials
+            }
+        }
 
+        var clientToken = await _authService.GetClientCredentialsTokenAsync(ct);
+        await _tokenStore.SaveTokenAsync(clientToken, ct);
+        return clientToken;
+    }
 }
