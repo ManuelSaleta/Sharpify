@@ -21,8 +21,10 @@ public interface ISpotifyClient
 
     /// <summary>
     /// Retrieves items (tracks/episodes) from a playlist by playlist ID.
+    /// <paramref name="playlistId"/> The id to search by
+    /// <paramref name="q"/> The parameters to pass
     /// </summary>
-    Task<PaginatedResponse<SavedItem>> GetPlaylistItemsAsync(string playlistId, CancellationToken ct = default);
+    Task<PaginatedResponse<SavedItem>> GetPlaylistItemsAsync(string playlistId, IReadOnlyDictionary<string, string>? q = null, CancellationToken ct = default);
 
     /// <summary>
     /// Retrieves items from a playlist using a SpotifyRequest.
@@ -70,10 +72,10 @@ public sealed class SpotifyClient : ISpotifyClient
         }
     }
 
-    public async Task<PaginatedResponse<SavedItem>> GetPlaylistItemsAsync(string playlistId, CancellationToken ct = default)
+    public async Task<PaginatedResponse<SavedItem>> GetPlaylistItemsAsync(string playlistId, IReadOnlyDictionary<string, string>? q = null, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(playlistId);
-        return await GetPlaylistItemsAsync(new SpotifyRequest($"playlists/{playlistId}/items"), ct);
+        return await GetPlaylistItemsAsync(new SpotifyRequest($"playlists/{playlistId}/items", null, q: q), ct);
     }
 
     public async Task<PaginatedResponse<SavedItem>> GetPlaylistItemsAsync(SpotifyRequest r, CancellationToken ct = default)

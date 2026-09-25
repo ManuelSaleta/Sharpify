@@ -4,6 +4,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Sharpify.Core.Authentication;
 using Sharpify.Core.Clients;
+using Sharpify.Core.Responses;
 
 internal class Program
 {
@@ -72,12 +73,22 @@ internal class Program
 
         Console.WriteLine($"\nFetching tracks for: \"{targetPlaylist.Name}\" (ID: {targetPlaylist.Id})...\n");
 
-        var result = await spotifyClient.GetPlaylistItemsAsync(targetPlaylist.Id, CancellationToken.None);
-
+        var result = await spotifyClient.GetPlaylistItemsAsync(targetPlaylist.Id);
+        var totalSongCount = result.Total;
+        var songs = new List<SavedItem>();
+        var offSet = result.Items.Count;
+        songs.AddRange(result.Items);
         Console.WriteLine($"Successfully retrieved {result.Total} tracks (showing {result.Items.Count}):\n");
-
+        while (offSet < totalSongCount)
+        {
+            var res = await spotifyClient
+            .GetPlaylistItemsAsync(targetPlaylist.Id, new Dictionary<string, string> { ["offset"] = $"{offSet}" });
+            songs.AddRange(res.Items);
+            offSet += res.Items.Count;
+            // if (offSet == totalSongCount) yield break;
+        }
         int index = 1;
-        foreach (var item in result.Items)
+        foreach (var item in songs)
         {
             var track = item.Item ?? item.Track;
             if (track is not null)
