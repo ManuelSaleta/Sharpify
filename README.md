@@ -130,6 +130,58 @@ public class MySpotifyService(SpotifyClient client)
 
 ---
 
+## Roadmap & Planned Features
+
+### 🚧 Automated Headless Spotify OAuth Authentication
+
+> [!NOTE]
+> **Status:** Under Research & Design (Planned / Work Required — Not Yet Implemented).
+>
+> Tracked in RFC specification: [docs/rfcs/001-automated-oauth-authentication.md](docs/rfcs/001-automated-oauth-authentication.md).
+
+Currently, Sharpify uses the interactive OAuth 2.0 Authorization Code flow requiring user login via a system browser window. We are designing a zero-touch automated login driver (primarily targeting developer CLI convenience with adaptability for headless CI/CD) using `Microsoft.Playwright` (with fallback to external scripting runtimes if bot challenges require it).
+
+#### Target Authentication Flow
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Core as Sharpify.Core (OAuthHelper)
+    participant Listener as HttpListener (127.0.0.1:5000/callback)
+    participant Driver as Automated Driver (.NET Playwright)
+    participant Spotify as Spotify Accounts (accounts.spotify.com)
+
+    Core->>Listener: Start listening on /callback
+    Core->>Core: Build authUri with state & scopes
+    Core->>Driver: Launch with authUri & credentials (Env/Secrets)
+    Driver->>Spotify: Navigate to authUri
+    Spotify-->>Driver: Render Login Page
+
+    alt CAPTCHA / 2FA Detected
+        alt AllowManualFallback == true
+            Driver->>Driver: Switch to Headful / Spawn System Browser
+            Note over Driver,Spotify: User manually completes CAPTCHA or 2FA challenge
+        else AllowManualFallback == false (Strict Automation / CI)
+            Driver-->>Core: Throw AuthenticationInterventionRequiredException
+            Core-->>Core: Fail immediately
+        end
+    else Normal Flow
+        Driver->>Spotify: Fill #login-username & #login-password, submit
+        alt Consent Required ("Agree")
+            Spotify-->>Driver: Render Consent Screen
+            Driver->>Spotify: Click "Agree" button
+        end
+    end
+
+    Spotify->>Listener: 302 Redirect to 127.0.0.1:5000/callback?code=...&state=...
+    Listener-->>Core: Capture authorization code
+    Driver->>Driver: Gracefully close browser context
+    Core->>Spotify: Exchange Code for Access/Refresh Token
+    Core->>Core: Save token to FileSpotifyTokenStore (~/.sharpify/token.json)
+```
+
+---
+
 ## Project Structure
 
 ```text
