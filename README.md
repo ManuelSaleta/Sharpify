@@ -19,10 +19,9 @@ A modern, extensible .NET Spotify Web API client library built on **.NET 10**.
 ### Prerequisites
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
+- Spotify Developer Account: Ensure `http://127.0.0.1:5000/callback` is added to your app's **Redirect URIs** in the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard).
 
 ### Building and Testing
-
-Clone the repository and build using the .NET CLI:
 
 ```bash
 # Restore and build the entire solution
@@ -50,6 +49,8 @@ Or configure them in `appsettings.Development.json`:
   "SpotifyClient": {
     "ClientBaseUrl": "https://api.spotify.com/v1",
     "UserAccountUrl": "https://accounts.spotify.com/api/token",
+    "AuthorizeUrl": "https://accounts.spotify.com/authorize",
+    "RedirectUri": "http://127.0.0.1:5000/callback",
     "ClientId": "<your-spotify-client-id>",
     "ClientSecret": "<your-spotify-client-secret>"
   }
@@ -65,6 +66,7 @@ Or configure them in `appsettings.Development.json`:
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Sharpify.Core.Authentication;
 using Sharpify.Core.Clients;
 
 // Bind and validate options
@@ -74,12 +76,34 @@ builder.Services
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
+// Register token store & authentication service
+builder.Services.AddSingleton<ISpotifyTokenStore, FileSpotifyTokenStore>();
+builder.Services.AddHttpClient<ISpotifyAuthService, SpotifyAuthService>();
+
 // Register typed client
 builder.Services.AddHttpClient<SpotifyClient>((serviceProvider, httpClient) =>
 {
     var options = serviceProvider.GetRequiredService<IOptions<SpotifyClientOptions>>().Value;
     httpClient.BaseAddress = new Uri(options.ClientBaseUrl.TrimEnd('/') + "/");
 });
+```
+
+### 2. Authenticate & Query Playlists
+
+```csharp
+using Sharpify.Core.Authentication;
+using Sharpify.Core.Clients;
+
+// 1. One-time interactive user login (cached to ~/.sharpify/token.json for future runs)
+await SpotifyOAuthHelper.LoginAsync(authService, tokenStore, options.RedirectUri);
+
+// 2. Fetch playlist items (tracks)
+var playlist = await spotifyClient.GetPlaylistItemsAsync("0vvXsWCC9xrXsKd4FyS8kM");
+
+foreach (var item in playlist.Items)
+{
+    Console.WriteLine($"🎵 {item.Track?.Name} - {item.Track?.Artists[0]?.Name}");
+}
 ```
 
 ### 2. Inject and Query
