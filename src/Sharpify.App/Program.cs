@@ -1,9 +1,12 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Sharpify.Core.Authentication;
 using Sharpify.Core.Clients;
+using Sharpify.Core.Data;
+using Sharpify.Core.Data.Interceptors;
 using Sharpify.Core.Responses;
 
 internal class Program
@@ -24,6 +27,18 @@ internal class Program
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // Configure SQLite Persistence Layer
+        var connectionString = builder.Configuration.GetConnectionString("DefaultConnection")
+            ?? "Data Source=sharpify.db;Cache=Shared";
+
+        builder.Services.AddSingleton<SqlitePragmaConnectionInterceptor>();
+        builder.Services.AddDbContext<SharpifyDbContext>((sp, options) =>
+        {
+            var interceptor = sp.GetRequiredService<SqlitePragmaConnectionInterceptor>();
+            options.UseSqlite(connectionString)
+                   .AddInterceptors(interceptor);
+        });
+
         // Register token store (persisted to ~/.sharpify/token.json)
         builder.Services.AddSingleton<ISpotifyTokenStore, FileSpotifyTokenStore>();
 
@@ -38,6 +53,26 @@ internal class Program
         });
 
         using IHost host = builder.Build();
+
+        // Run automated database migrations on startup
+        using (var scope = host.Services.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SharpifyDbContext>();
+            var connection = dbContext.Database.GetDbConnection();
+            if (connection is Microsoft.Data.Sqlite.SqliteConnection sqliteConn)
+            {
+                var csb = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(sqliteConn.ConnectionString);
+                if (!string.IsNullOrWhiteSpace(csb.DataSource) && !csb.DataSource.StartsWith(":memory:", StringComparison.OrdinalIgnoreCase))
+                {
+                    var dir = Path.GetDirectoryName(Path.GetFullPath(csb.DataSource));
+                    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+                    {
+                        Directory.CreateDirectory(dir);
+                    }
+                }
+            }
+            await dbContext.Database.MigrateAsync();
+        }
 
         var options = host.Services.GetRequiredService<IOptions<SpotifyClientOptions>>().Value;
         var tokenStore = host.Services.GetRequiredService<ISpotifyTokenStore>();
