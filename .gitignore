@@ -18,6 +18,12 @@ TestResults/
 # macOS
 .DS_Store
 
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+
 # User-specific / Local secrets override
 appsettings*.local.json
 secrets.json
+
